@@ -1,0 +1,11 @@
+{
+	"name": "texy-build",
+	"private": true,
+	"description": "Bundles MathJax into hooks/vendor/mathjax/ for the texy mod.",
+	"scripts": {
+		"build": "bun build.ts"
+	},
+	"dependencies": {
+		"mathjax-full": "3.2.2"
+	}
+}

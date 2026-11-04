@@ -1,0 +1,14 @@
+{
+	"name": "texy",
+	"description": "texy: real math in Claude's replies.",
+	"owner": {
+		"name": "Alvaro",
+		"url": "https://github.com/alvaroelpob"
+	},
+	"plugins": [
+		{
+			"name": "texy",
+			"source": "./"
+		}
+	]
+}

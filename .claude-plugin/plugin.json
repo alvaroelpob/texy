@@ -1,7 +1,7 @@
 {
 	"name": "texy",
 	"version": "1.0.0",
-	"description": "Typesets TeX math ($...$, $$...$$, \\(...\\), \\[...\\]) in Claude's replies in the desktop app, with MathJax. No TeX install needed.",
+	"description": "LaTeX math rendering for the Claude Code desktop app, no TeX install needed.",
 	"author": {
 		"name": "Alvaro",
 		"url": "https://github.com/alvaroelpob"

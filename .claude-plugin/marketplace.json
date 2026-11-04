@@ -1,6 +1,6 @@
 {
 	"name": "texy",
-	"description": "texy: real math in Claude's replies.",
+	"description": "LaTeX math rendering for the Claude Code desktop app, no TeX install needed.",
 	"owner": {
 		"name": "Alvaro",
 		"url": "https://github.com/alvaroelpob"

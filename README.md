@@ -5,7 +5,7 @@
 	</picture>
 </p>
 
-<p align="center"><b>A Claude Code mod for the desktop app. No TeX install needed.</b>
+<p align="center"><b>LaTeX math rendering for the Claude Code desktop app, no TeX install needed.</b>
 
 ## Examples
 

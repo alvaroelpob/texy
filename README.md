@@ -1,4 +1,9 @@
-<p align="center"><img src="assets/wordmark.png" width="360" alt="texy"></p>
+<p align="center">
+	<picture>
+		<source media="(prefers-color-scheme: dark)" srcset="assets/wordmark-dark.png">
+		<img src="assets/wordmark.png" width="360" alt="texy">
+	</picture>
+</p>
 
 <p align="center"><b>A Claude Code mod for the desktop app. No TeX install needed.</b>
 

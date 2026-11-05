@@ -4,8 +4,12 @@ import { tex2svg } from './vendor/mathjax/entry'
 export type Scheme = 'auto' | 'light' | 'dark'
 export type Size = 'small' | 'normal' | 'large'
 
-/** Pixels per ex at each size; 7.5 sits beside the Code tab's body text. */
-const EX_PX: Record<Size, number> = { small: 6.5, normal: 7.5, large: 9 }
+/**
+ * Pixels per ex at each size; 7.5 sits beside the Code tab's body text.
+ * small and large are 0.9 and 1.2 of it, the steps of TeX's \small and
+ * \large, which texy adds to the formulas the app draws (see safe.ts).
+ */
+const EX_PX: Record<Size, number> = { small: 6.75, normal: 7.5, large: 9 }
 const INK = { light: '#1f1f1f', dark: '#ececec', either: '#8a8a8a' }
 const SVG_LIMIT = 131072
 
@@ -74,13 +78,34 @@ export function finish(t: { markup: string; width: number; height: number }, sch
 		scheme === 'auto'
 			? `svg{color:${INK.light}}@media (prefers-color-scheme: dark){svg{color:${INK.dark}}}`
 			: `svg{color:${INK[scheme]}}`
-	const svg = markup
+	const svg = trim(markup)
 		.replace(/ style="vertical-align:[^"]*"/, '')
 		.replace(/ width="[\d.]+ex"/, ` width="${w}"`)
 		.replace(/ height="[\d.]+ex"/, ` height="${h.toFixed(2)}"`)
 		.replace(/^<svg/, `<svg color="${INK.either}"`)
 		.replace(/^(<svg[^>]*>)/, `$1<style>${css}</style>`)
 	return svg.length > SVG_LIMIT ? null : svg
+}
+
+/**
+ * MathJax's SVG without what only a web page uses: the data-* attributes that
+ * name each node, accessibility attributes (the app gets the TeX as the
+ * image's alt), long glyph ids and closing tags. The drawing is unchanged;
+ * every character saved counts toward the app's limit on one message.
+ */
+export function trim(svg: string): string {
+	const ids = new Map<string, string>()
+	const short = (id: string) => {
+		if (!ids.has(id)) ids.set(id, `g${ids.size.toString(36)}`)
+		return ids.get(id)!
+	}
+	return svg
+		.replace(/ data-[a-z-]+="[^"]*"/g, '')
+		.replace(/ role="img"| focusable="false"| aria-hidden="true"/g, '')
+		.replace(/ xmlns:xlink="[^"]*"/, '')
+		.replace(/ id="([^"]+)"/g, (_, id: string) => ` id="${short(id)}"`)
+		.replace(/xlink:href="#([^"]+)"/g, (_, id: string) => `href="#${short(id)}"`)
+		.replace(/<(path|use) ([^>]*)><\/\1>/g, '<$1 $2/>')
 }
 
 /** A formula as SVG markup at these settings, or null when it doesn't typeset. */

@@ -3,6 +3,7 @@ import type { Register } from 'claude-code'
 
 import { drawBlocks } from './draw'
 import { hasMath, parse } from './parse'
+import { handToApp } from './safe'
 import { registerSettings } from './settings'
 
 // Declared in each file that reads or writes it: the engine lists a module's
@@ -30,11 +31,21 @@ export const register: Register = on => {
 	on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
 		if (e.surface === 'terminal' || e.props.isSummary === true) return next(e)
 
-		const blocks = parse(e.props.text)
-		if (!hasMath(blocks)) return next(e)
+		const parsed = parse(e.props.text)
+		if (!hasMath(parsed)) return next(e)
 
 		// Reading the size subscribes this reply: a new size redraws it at once.
 		const size = await read($, mathSize)
+
+		// Formulas the app renders by itself go back to it as Markdown, at the
+		// size; texy draws only the rest. A reply with nothing left for texy is
+		// the app's alone, its text sized when the size isn't normal.
+		const blocks = handToApp(parsed, size)
+		if (!hasMath(blocks)) {
+			const only = blocks[0]
+			if (size === 'normal' || only?.kind !== 'markdown') return next(e)
+			return next({ ...e, props: { ...e.props, text: only.text } })
+		}
 		return drawBlocks($.ui.resolve(e), blocks, size)
 	})
 }

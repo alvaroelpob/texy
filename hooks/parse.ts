@@ -18,7 +18,15 @@ export type Marker =
 export type Block =
 	| { kind: 'markdown'; text: string }
 	| { kind: 'display'; tex: string; raw: string }
-	| { kind: 'row'; marker: Marker; parts: Inline[] }
+	| {
+			kind: 'row'
+			marker: Marker
+			parts: Inline[]
+			/** The line(s) as written, marker included. */
+			source: string
+			/** Whether the line continues the one above it in the same paragraph. */
+			joinsAbove: boolean
+	  }
 
 const FENCE = /^ {0,3}(`{3,}|~{3,})/
 
@@ -132,7 +140,7 @@ function parseParagraphs(src: string, out: Block[]): void {
 		for (const row of rows) {
 			const parts = parseInline(row.text)
 			if (parts.some(p => p.kind === 'math')) {
-				out.push({ kind: 'row', marker: row.marker, parts })
+				out.push({ kind: 'row', marker: row.marker, parts, source: row.source.join('\n'), joinsAbove: !first })
 			} else {
 				pushMarkdown(out, row.source.join('\n'), first ? '\n\n' : '\n')
 			}

@@ -69,7 +69,7 @@ Or set it directly: `/texy size large`
 ## Good to know
 
 - Works in the desktop app's Code tab. The terminal shows the raw TeX.
-- Math inside tables isn't rendered yet.
+- Inside tables, only simple formulas render.
 
 ## Development
 

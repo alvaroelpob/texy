@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 (2026-11-05)
+
+- Fixed: in long messages, formulas showed as raw LaTeX after reopening the app. The app lets a mod draw about 256 KiB per message, and texy drew every formula.
+- Formulas the app already renders well are now left to it; texy draws only the rest, such as multi-line `aligned` blocks. The long message that broke goes from 284 KiB to 112.6 KiB of drawing.
+- texy's SVGs are lighter: attributes only a web page uses are removed. They look the same.
+- `/texy size` now applies to every formula in a message, including the ones the app draws.
+- Simple formulas inside tables now render.
+
 ## 1.0.0 (2026-11-05)
 
 First release.

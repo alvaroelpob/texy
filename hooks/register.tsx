@@ -14,7 +14,8 @@ const NOTE = [
 	'Math in your replies is typeset in this app (the texy mod).',
 	'Write inline math as $...$ or \\(...\\), and display math as $$...$$ or \\[...\\] on lines of their own;',
 	'equation, align, gather and multline environments render too, as do AMS commands and \\ce{} from mhchem.',
-	'Use LaTeX for math rather than Unicode symbols or code blocks. Math inside code blocks, inline code and tables stays as written.',
+	'Use LaTeX for math rather than Unicode symbols or code blocks. Math inside code blocks and inline code stays as written.',
+	'Inside tables only simple formulas render: keep multi-line or long math out of table cells.',
 	'Write a literal dollar sign as \\$ when a closing $ could follow it on the same line.',
 ].join(' ')
 

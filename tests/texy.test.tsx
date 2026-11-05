@@ -1,7 +1,9 @@
 import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
+import { svgOf } from '../hooks/math'
 import { parse, parseInline } from '../hooks/parse'
+import { handToApp, isSafeDisplay, isSafeInline } from '../hooks/safe'
 
 const reply = (text: string) =>
 	({
@@ -31,35 +33,82 @@ test('a list keeps its other items as markdown', async () => {
 	expect(blocks.map(b => b.kind)).toEqual(['markdown', 'row', 'markdown'])
 })
 
-test('a reply with math draws SVG on desktop and is left alone on the terminal', async ($, on) => {
+// A multi-line block with its $$ on the formula's lines: the app shows it as text.
+const ALIGNED = '$$\\begin{aligned}\nR_n &= An + B\\\\\nR_{n-1} &= A(n-1) + B\n\\end{aligned}$$'
+
+test('the safe list: what the app renders by itself', async () => {
+	// Inline formulas seen rendering in the app.
+	expect(isSafeInline('\\binom{n}{k} = \\frac{n!}{k!\\,(n-k)!}')).toBe(true)
+	expect(isSafeInline('|A \\cup B| = |A| + |B| - |A \\cap B|')).toBe(true)
+	expect(isSafeInline('a \\equiv b \\pmod{n}')).toBe(true)
+	// A long one failed in the app; so do untested macros and line breaks.
+	expect(isSafeInline('|A \\cup B \\cup C| = |A| + |B| + |C| - |A \\cap B| - |A \\cap C| - |B \\cap C| + |A \\cap B \\cap C|')).toBe(false)
+	expect(isSafeInline('\\ce{H2O}')).toBe(false)
+	expect(isSafeInline('\\begin{pmatrix} 1 \\\\ 2 \\end{pmatrix}')).toBe(false)
+
+	// Centred: one line, or $$ on lines of their own.
+	expect(isSafeDisplay('$$a^2 + b^2 = c^2$$', 'a^2 + b^2 = c^2')).toBe(true)
+	expect(isSafeDisplay('\\[a^2 + b^2 = c^2\\]', 'a^2 + b^2 = c^2')).toBe(true)
+	const own = '$$\n\\begin{aligned}\na &= b \\\\\nc &= d\n\\end{aligned}\n$$'
+	expect(isSafeDisplay(own, own.slice(3, -3).trim())).toBe(true)
+	// $$ stuck to multi-line content is what breaks.
+	expect(isSafeDisplay(ALIGNED, ALIGNED.slice(2, -2))).toBe(false)
+	// Environments not seen rendering, and bare environments.
+	expect(isSafeDisplay('$$\\begin{gather} a \\\\ b \\end{gather}$$', '\\begin{gather} a \\\\ b \\end{gather}')).toBe(false)
+	expect(isSafeDisplay('\\begin{align}a &= b\\end{align}', '\\begin{align}a &= b\\end{align}')).toBe(false)
+})
+
+test('safe formulas go back to the app as written', async () => {
+	const text = 'Sum: $\\frac{a}{b}$ here.\n\n$$a^2 + b^2 = c^2$$\n\n' + ALIGNED
+	const blocks = handToApp(parse(text))
+	expect(blocks.map(b => b.kind)).toEqual(['markdown', 'display'])
+	expect(blocks[0]?.kind === 'markdown' ? blocks[0].text : '').toBe('Sum: $\\frac{a}{b}$ here.\n\n$$a^2 + b^2 = c^2$$')
+})
+
+test('texy draws only what the app cannot, and nothing on the terminal', async ($, on) => {
 	on('ui.render', ($, e) => {
 		const { Text } = $.ui.resolve(e)
 		return <Text>engine</Text>
 	})
 
-	const desktop = await $.ui.mount({ ...reply('Euler: $e^{i\\pi}+1=0$\n\n$$\\sum_{n=1}^\\infty \\frac{1}{n^2}$$'), surface: 'desktop' })
-	const svg = await desktop.find({ type: 'Svg' })
-	expect(svg).toBeDefined()
-	expect(await desktop.find({ type: 'Markdown', text: /Euler:/ })).toBeDefined()
+	// The aligned block is drawn by texy; the safe line stays the app's Markdown.
+	const desktop = await $.ui.mount({ ...reply(`Then $x^2$ here.\n\n${ALIGNED}`), surface: 'desktop' })
+	expect(await desktop.findAll({ type: 'Svg' })).toHaveLength(1)
+	expect(await desktop.find({ type: 'Markdown', text: /Then \$x\^2\$ here\./ })).toBeDefined()
 	await desktop.unmount()
+
+	// Nothing left for texy: the app draws the whole reply.
+	const safe = await $.ui.mount({ ...reply('Sum: $\\frac{a}{b}$\n\n$$a^2 + b^2 = c^2$$'), surface: 'desktop' })
+	expect(await safe.find({ type: 'Text', text: 'engine' })).toBeDefined()
+	await safe.unmount()
 
 	const plain = await $.ui.mount({ ...reply('no math here, just $5'), surface: 'desktop' })
 	expect(await plain.find({ type: 'Text', text: 'engine' })).toBeDefined()
 	await plain.unmount()
 
-	const terminal = await $.ui.mount({ ...reply('Euler: $e^{i\\pi}+1=0$'), surface: 'terminal' })
+	const terminal = await $.ui.mount({ ...reply(`Then $x^2$ here.\n\n${ALIGNED}`), surface: 'terminal' })
 	expect(await terminal.find({ type: 'Text', text: 'engine' })).toBeDefined()
 	await terminal.unmount()
 })
 
-test('broken TeX shows its source instead', async ($, on) => {
+test('broken TeX that texy draws shows its source instead', async ($, on) => {
 	on('ui.render', ($, e) => {
 		const { Text } = $.ui.resolve(e)
 		return <Text>engine</Text>
 	})
-	const ui = await $.ui.mount({ ...reply('bad: $\\frac{a$ ok'), surface: 'desktop' })
-	expect(await ui.find({ type: 'Markdown', text: /\$\\frac\{a\$/ })).toBeDefined()
+	const ui = await $.ui.mount({ ...reply('bad:\n\n$$\\begin{aligned}\nx &= \\frac{a\n\\end{aligned}$$'), surface: 'desktop' })
+	expect(await ui.find({ type: 'Markdown', text: /frac\{a/ })).toBeDefined()
 	await ui.unmount()
+})
+
+test("texy's SVGs carry nothing but the drawing", async () => {
+	const svg = svgOf('x_i^2 + y', false, 'auto', 'normal') ?? ''
+	expect(svg.startsWith('<svg')).toBe(true)
+	expect(svg.includes('data-mml-node')).toBe(false)
+	expect(svg.includes('xlink')).toBe(false)
+	expect(svg.includes('MJX-')).toBe(false)
+	expect(svg.includes('</path>')).toBe(false)
+	expect(svg.includes('href="#g0"')).toBe(true)
 })
 
 // What a test stands up for /texy: $.store kept in memory, as a session keeps it.

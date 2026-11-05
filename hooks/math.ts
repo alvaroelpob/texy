@@ -4,8 +4,12 @@ import { tex2svg } from './vendor/mathjax/entry'
 export type Scheme = 'auto' | 'light' | 'dark'
 export type Size = 'small' | 'normal' | 'large'
 
-/** Pixels per ex at each size; 7.5 sits beside the Code tab's body text. */
-const EX_PX: Record<Size, number> = { small: 6.5, normal: 7.5, large: 9 }
+/**
+ * Pixels per ex at each size; 7.5 sits beside the Code tab's body text.
+ * small and large are 0.9 and 1.2 of it, the steps of TeX's \small and
+ * \large, which texy adds to the formulas the app draws (see safe.ts).
+ */
+const EX_PX: Record<Size, number> = { small: 6.75, normal: 7.5, large: 9 }
 const INK = { light: '#1f1f1f', dark: '#ececec', either: '#8a8a8a' }
 const SVG_LIMIT = 131072
 

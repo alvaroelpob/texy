@@ -4,10 +4,15 @@
 //
 // The list holds only what was seen rendering in the desktop app with texy
 // turned off. Anything not on it, texy draws.
-import type { Block } from './parse'
+import type { Size } from './math'
+import type { Block, Inline } from './parse'
 
 /** Macros seen rendering in the app. */
 const SAFE_MACROS = new Set([
+	// Size, inline and centred, aligned and cases included.
+	'small',
+	'large',
+	'Large',
 	// Spacing and escapes.
 	',',
 	' ',
@@ -91,10 +96,55 @@ export function isSafeDisplay(raw: string, tex: string): boolean {
 }
 
 /**
- * The blocks with every safe formula turned back into Markdown, as written,
- * so the app draws it. What is left as a row or a display block, texy draws.
+ * The TeX command that gives a formula drawn by the app the size texy's own
+ * formulas have: \small is 0.9 of the text, \large 1.2, as texy draws them.
  */
-export function handToApp(blocks: readonly Block[]): Block[] {
+const SIZE_COMMAND: Record<Size, string> = { small: '\\small', normal: '', large: '\\large' }
+
+/** An inline formula, written again with the size command after its opening delimiter. */
+function sizedInline(raw: string, tex: string, command: string): string {
+	if (command === '') return raw
+	return raw.startsWith('\\(') ? `\\(${command} ${tex}\\)` : `$${command} ${tex}$`
+}
+
+/**
+ * A centred formula with the size command after its opening delimiter. With
+ * $$ on lines of their own, the command goes on a line of its own after them.
+ */
+function sizedDisplay(raw: string, command: string): string {
+	if (command === '') return raw
+	const open = raw.startsWith('\\[') ? '\\[' : '$$'
+	if (raw.includes('\n')) {
+		const firstLine = raw.indexOf('\n')
+		return `${raw.slice(0, firstLine + 1)}${command}\n${raw.slice(firstLine + 1)}`
+	}
+	return `${open}${command} ${raw.slice(open.length)}`
+}
+
+/** A line of prose with each inline formula written again at the size. */
+function sizedRow(source: string, parts: readonly Inline[], command: string): string {
+	if (command === '') return source
+	let out = ''
+	let from = 0
+	for (const p of parts) {
+		if (p.kind !== 'math') continue
+		const at = source.indexOf(p.raw, from)
+		// A formula split over two lines of the source is left as it is.
+		if (at < 0) continue
+		out += source.slice(from, at) + sizedInline(p.raw, p.tex, command)
+		from = at + p.raw.length
+	}
+	return out + source.slice(from)
+}
+
+/**
+ * The blocks with every safe formula turned back into Markdown, so the app
+ * draws it: as written, with a size command when the size isn't normal.
+ * Whether a formula is safe is judged on what Claude wrote, before the
+ * command is added. What is left as a row or a display block, texy draws.
+ */
+export function handToApp(blocks: readonly Block[], size: Size = 'normal'): Block[] {
+	const command = SIZE_COMMAND[size]
 	const out: Block[] = []
 	const push = (text: string, sep: string) => {
 		const last = out[out.length - 1]
@@ -103,9 +153,10 @@ export function handToApp(blocks: readonly Block[]): Block[] {
 	}
 	for (const b of blocks) {
 		if (b.kind === 'markdown') push(b.text, '\n\n')
-		else if (b.kind === 'display' && isSafeDisplay(b.raw, b.tex)) push(b.raw, '\n\n')
-		else if (b.kind === 'row' && b.parts.every(p => p.kind !== 'math' || isSafeInline(p.tex))) push(b.source, b.joinsAbove ? '\n' : '\n\n')
-		else out.push(b)
+		else if (b.kind === 'display' && isSafeDisplay(b.raw, b.tex)) push(sizedDisplay(b.raw, command), '\n\n')
+		else if (b.kind === 'row' && b.parts.every(p => p.kind !== 'math' || isSafeInline(p.tex))) {
+			push(sizedRow(b.source, b.parts, command), b.joinsAbove ? '\n' : '\n\n')
+		} else out.push(b)
 	}
 	return out
 }

@@ -65,6 +65,40 @@ test('safe formulas go back to the app as written', async () => {
 	expect(blocks[0]?.kind === 'markdown' ? blocks[0].text : '').toBe('Sum: $\\frac{a}{b}$ here.\n\n$$a^2 + b^2 = c^2$$')
 })
 
+test('safe formulas get the size command; unsafe ones are left for texy', async () => {
+	const text = 'Sum $\\frac{a}{b}$ and \\(x^2\\).\n\n$$a^2 + b^2 = c^2$$\n\n\\[\\sqrt{2}\\]\n\n$$\n\\begin{aligned}\na &= b \\\\\nc &= d\n\\end{aligned}\n$$\n\n' + ALIGNED
+	const large = handToApp(parse(text), 'large')
+	expect(large.map(b => b.kind)).toEqual(['markdown', 'display'])
+	const md = large[0]?.kind === 'markdown' ? large[0].text : ''
+	expect(md).toContain('Sum $\\large \\frac{a}{b}$ and \\(\\large x^2\\).')
+	expect(md).toContain('$$\\large a^2 + b^2 = c^2$$')
+	expect(md).toContain('\\[\\large \\sqrt{2}\\]')
+	expect(md).toContain('$$\n\\large\n\\begin{aligned}')
+	// The unsafe block is judged as written and stays for texy, with no command added.
+	expect(large[1]?.kind === 'display' ? large[1].raw : '').toBe(ALIGNED)
+
+	expect(handToApp(parse('Sum $\\frac{a}{b}$.'), 'small')[0]).toEqual({ kind: 'markdown', text: 'Sum $\\small \\frac{a}{b}$.' })
+	// normal leaves the text exactly as written.
+	expect(handToApp(parse('Sum $\\frac{a}{b}$.'), 'normal')[0]).toEqual({ kind: 'markdown', text: 'Sum $\\frac{a}{b}$.' })
+})
+
+test('at large, a reply the app draws alone gets its sized text', async ($, on) => {
+	on('ui.open', () => ({ value: { isPlaced: false, reason: 'narrow' } }))
+	withStore(on)
+	const drawn: string[] = []
+	on('ui.render', ($, e) => {
+		if (e.component === 'AssistantMessage') drawn.push(e.props.text)
+		const { Text } = $.ui.resolve(e)
+		return <Text>engine</Text>
+	})
+	await $.command.run({ command: 'texy', args: 'size large', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 100 } })
+
+	const ui = await $.ui.mount({ ...reply('Sum: $\\frac{a}{b}$'), surface: 'desktop' })
+	expect(await ui.find({ type: 'Text', text: 'engine' })).toBeDefined()
+	expect(drawn[drawn.length - 1]).toBe('Sum: $\\large \\frac{a}{b}$')
+	await ui.unmount()
+})
+
 test('texy draws only what the app cannot, and nothing on the terminal', async ($, on) => {
 	on('ui.render', ($, e) => {
 		const { Text } = $.ui.resolve(e)

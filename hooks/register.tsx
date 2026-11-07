@@ -47,6 +47,7 @@ export const register: Register = on => {
 			if (size === 'normal' || only?.kind !== 'markdown') return next(e)
 			return next({ ...e, props: { ...e.props, text: only.text } })
 		}
+
 		return drawBlocks($.ui.resolve(e), blocks, size)
 	})
 }

@@ -34,6 +34,34 @@ function addSpace(group: Array<{ md: string } | { node: unknown }>, space: strin
 	else group.push({ md: space })
 }
 
+/**
+ * The app breaks a line wherever the reply does; the Markdown element alone
+ * only wraps, running the lines together. So each break inside a paragraph is
+ * made a hard one. Code fences and tables are left as written.
+ */
+export function keepBreaks(md: string): string {
+	const lines = md.split('\n')
+	let fenced = false
+	let display = false
+	return lines
+		.map((line, i) => {
+			const isFence = /^ {0,3}(`{3,}|~{3,})/.test(line)
+			const inside = fenced
+			if (isFence) fenced = !fenced
+			// A display's own lines are never soft breaks: spaces there can stop the app reading it.
+			const edge = /^\s*(\$\$|\\\[)/.test(line) || /(\$\$|\\\])\s*$/.test(line)
+			const insideDisplay = display
+			if (/^\s*(\$\$|\\\[|\\\])\s*$/.test(line) && !isFence) display = !display
+			const next = lines[i + 1]
+			if (inside || isFence || edge || insideDisplay || next === undefined || line.trim() === '' || next.trim() === '') return line
+			if (/^\s*(\$\$|\\\[)/.test(next)) return line
+			if (line.trimStart().startsWith('|') || next.trimStart().startsWith('|')) return line
+			if (/( {2}|\\)$/.test(line)) return line
+			return line + '  '
+		})
+		.join('\n')
+}
+
 export function drawBlocks(t: Elements, blocks: readonly Block[], size: Size): RenderElement {
 	const { Box, Markdown, Svg } = t
 
@@ -115,7 +143,7 @@ export function drawBlocks(t: Elements, blocks: readonly Block[], size: Size): R
 	}
 
 	const block = (b: Block): RenderNode => {
-		if (b.kind === 'markdown') return <Markdown text={b.text} />
+		if (b.kind === 'markdown') return <Markdown text={keepBreaks(b.text)} />
 		if (b.kind === 'display') {
 			return (
 				<Box flexDirection="column" alignItems="center" paddingY="xs">
@@ -126,9 +154,16 @@ export function drawBlocks(t: Elements, blocks: readonly Block[], size: Size): R
 		return row(b.marker, b.parts)
 	}
 
+	// A gap between blocks, except where a block continues the line above it.
+	const isTight = (b: Block) => (b.kind === 'markdown' && b.tight === true) || (b.kind === 'row' && b.joinsAbove)
+
 	return (
-		<Box flexDirection="column" rowGap="sm">
-			{blocks.map(block)}
+		<Box flexDirection="column">
+			{blocks.map((b, i) => (
+				<Box flexDirection="column" paddingTop={i === 0 || isTight(b) ? 0 : 'sm'}>
+					{block(b)}
+				</Box>
+			))}
 		</Box>
 	)
 }

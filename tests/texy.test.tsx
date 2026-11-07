@@ -1,6 +1,7 @@
 import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 
+import { keepBreaks } from '../hooks/draw'
 import { svgOf } from '../hooks/math'
 import { parse, parseInline } from '../hooks/parse'
 import { handToApp, isSafeDisplay, isSafeInline } from '../hooks/safe'
@@ -58,6 +59,115 @@ test('the safe list: what the app renders by itself', async () => {
 	expect(isSafeDisplay('\\begin{align}a &= b\\end{align}', '\\begin{align}a &= b\\end{align}')).toBe(false)
 })
 
+test('inline: the limits measured in the app', async () => {
+	// 60 characters render in the app, 64 do not; spaces make no difference.
+	const sixty = 'x_1 + x_2 + x_3 + x_4 + x_5 + x_6 + x_7 + x_8 + x_9 + x_{10}'
+	expect(sixty.length).toBe(60)
+	expect(isSafeInline(sixty)).toBe(true)
+	expect(isSafeInline(sixty + ' + a')).toBe(false)
+	const noSpaces = sixty.replaceAll(' ', '') + '+x_{11}+x_{12}+x_{13}+x_{14}+x_{15}'
+	expect(noSpaces.length).toBe(77)
+	expect(isSafeInline(noSpaces)).toBe(false)
+	// \| breaks an inline formula in the app, its look-alikes do not.
+	expect(isSafeInline('\\|x\\|')).toBe(false)
+	expect(isSafeInline('\\left\\| x \\right\\|')).toBe(false)
+	expect(isSafeInline('\\lVert x \\rVert')).toBe(true)
+	expect(isSafeInline('\\Vert x \\Vert')).toBe(true)
+	// A plain word of four letters, a bare % or CJK text make the app skip it.
+	expect(isSafeInline('mass = m')).toBe(false)
+	expect(isSafeInline('\\text{mass} = m')).toBe(true)
+	expect(isSafeInline('\\mathrm{mass} = m')).toBe(true)
+	expect(isSafeInline('p = 50%')).toBe(false)
+	expect(isSafeInline('p = 50\\%')).toBe(true)
+	expect(isSafeInline('\u901f\u5ea6 = v')).toBe(false)
+	// A letter or a short expression is math to the app.
+	expect(isSafeInline('x')).toBe(true)
+	expect(isSafeInline('2x+1')).toBe(true)
+	// Not in the app's KaTeX, or meant for a centred formula only.
+	expect(isSafeInline('\\substack{i<n}')).toBe(false)
+	expect(isSafeInline('\\tag{1} x = 1')).toBe(false)
+	expect(isSafeInline('\\newcommand{\\R}{\\mathbb{R}} \\R^n')).toBe(false)
+})
+
+test('centred: what the app renders and what it numbers wrongly', async () => {
+	const bmatrix = '\\begin{bmatrix} a & b \\\\ c & d \\end{bmatrix}'
+	expect(isSafeDisplay(`$$${bmatrix}$$`, bmatrix)).toBe(true)
+	// \| is fine centred.
+	expect(isSafeDisplay('$$\\|x\\| = 1$$', '\\|x\\| = 1')).toBe(true)
+	// A multi-line \[ ... \] is shown as text; so is anything past the app's length.
+	expect(isSafeDisplay('\\[\nx^2\n\\]', 'x^2')).toBe(false)
+	expect(isSafeDisplay(`$$${'x'.repeat(5001)}$$`, 'x'.repeat(5001))).toBe(false)
+	// align and gather number every row (1) in the app; texy draws them.
+	const align = '\\begin{align} x &= 1 \\\\ y &= 2 \\end{align}'
+	expect(isSafeDisplay(`$$${align}$$`, align)).toBe(false)
+	// \ce is not in the app.
+	expect(isSafeDisplay('$$\\ce{H2O}$$', '\\ce{H2O}')).toBe(false)
+})
+
+test('bare matrices are formulas; inline ones stay with their dollars', async () => {
+	const bare = parse('Matrix:\n\n\\begin{pmatrix} 1 & 2 \\\\ 3 & 4 \\end{pmatrix}')
+	expect(bare.map(b => b.kind)).toEqual(['markdown', 'display'])
+	const inline = parse('Here $\\begin{pmatrix} 1 \\\\ 2 \\end{pmatrix}$ is a vector.')
+	expect(inline.map(b => b.kind)).toEqual(['row'])
+})
+
+test('texy keeps what the app cannot draw, in prose too', async () => {
+	expect(handToApp(parse('The norm $\\|v\\|$ here.')).map(b => b.kind)).toEqual(['row'])
+	expect(handToApp(parse('The norm $\\lVert v \\rVert$ here.')).map(b => b.kind)).toEqual(['markdown'])
+})
+
+test('a $$ inside a sentence does not pair with the next display', async () => {
+	const blocks = parse('B3. Display con $$ en sus propias líneas:\n$$\n\\sum_{k=0}^{n} k\n$$\nB4. con $$ pegado:\n$$a = b\nd = e$$')
+	const tex = blocks.flatMap(b => (b.kind === 'display' ? [b.tex] : []))
+	expect(tex).toEqual(['\\sum_{k=0}^{n} k', 'a = b\nd = e'])
+	// A \[ in a sentence is no different; one that starts a line still spans lines.
+	const bracket = parse('Texto con \\[ suelto:\n\\[ x^2 + y^2\n= r^2 \\]')
+	expect(bracket.flatMap(b => (b.kind === 'display' ? [b.tex] : []))).toEqual(['x^2 + y^2\n= r^2'])
+	// After text, a display that closes on its own line is still one.
+	expect(parse('Antes: $$x^2$$').map(b => b.kind)).toEqual(['markdown', 'display'])
+})
+
+test('each line stays its own row, so one formula does not pull in its neighbours', async () => {
+	const blocks = handToApp(parse('P1. $mass = m$\nP2. $x^2$\nP3. $\\|v\\|$\nplain'))
+	expect(blocks.map(b => b.kind)).toEqual(['row', 'markdown', 'row', 'markdown'])
+	expect(blocks[1]).toEqual({ kind: 'markdown', text: 'P2. $x^2$', tight: true })
+	expect(blocks[3]).toEqual({ kind: 'markdown', text: 'plain', tight: true })
+})
+
+test('line breaks inside a paragraph are kept hard; code and tables are left alone', async () => {
+	expect(keepBreaks('a\nb')).toBe('a  \nb')
+	expect(keepBreaks('a\n\nb')).toBe('a\n\nb')
+	expect(keepBreaks('a  \nb')).toBe('a  \nb')
+	expect(keepBreaks('```\nx\ny\n```')).toBe('```\nx\ny\n```')
+	expect(keepBreaks('| a | b |\n| - | - |')).toBe('| a | b |\n| - | - |')
+	expect(keepBreaks('x $a$\ny')).toBe('x $a$  \ny')
+	// A display's lines are left exactly as written, and so are the ones touching its edges.
+	expect(keepBreaks('$$\na = b\n$$\nafter')).toBe('$$\na = b\n$$\nafter')
+	expect(keepBreaks('before\n$$x$$\nafter')).toBe('before\n$$x$$\nafter')
+	expect(keepBreaks('\\[\nx\n\\]\nafter')).toBe('\\[\nx\n\\]\nafter')
+})
+
+test('text under a display is a paragraph of its own, never a continuation of the display', async () => {
+	const handed = handToApp(parse('F4. Normal:\n$$x^2$$\nF5. $y^2$\nG1. $z^2$'))
+	const md = handed[0]?.kind === 'markdown' ? handed[0].text : ''
+	expect(md).toContain('$$x^2$$\n\nF5. $y^2$\nG1. $z^2$')
+	expect(md).not.toContain('$$x^2$$\nF5')
+	// The same when texy draws a neighbour: no display is ever glued to a line of text.
+	for (const b of handToApp(parse('A:\n$$x^2$$\nB. $y^2$\nC. $\\|v\\|$'))) {
+		if (b.kind === 'markdown') expect(/\$\$[^\n]*\$\$\n[^\n]/.test(b.text)).toBe(false)
+	}
+})
+
+test('lines the app keeps stay on their own lines when texy draws a neighbour', async ($, on) => {
+	on('ui.render', ($, e) => {
+		const { Text } = $.ui.resolve(e)
+		return <Text>engine</Text>
+	})
+	const ui = await $.ui.mount({ ...reply('P1. $x^2$\nP2. $y^2$\nP3. $\\|v\\|$'), surface: 'desktop' })
+	expect(await ui.find({ type: 'Markdown', text: /P1\. \$x\^2\$ {2}\nP2\. \$y\^2\$/ })).toBeDefined()
+	await ui.unmount()
+})
+
 test('safe formulas go back to the app as written', async () => {
 	const text = 'Sum: $\\frac{a}{b}$ here.\n\n$$a^2 + b^2 = c^2$$\n\n' + ALIGNED
 	const blocks = handToApp(parse(text))
@@ -65,24 +175,25 @@ test('safe formulas go back to the app as written', async () => {
 	expect(blocks[0]?.kind === 'markdown' ? blocks[0].text : '').toBe('Sum: $\\frac{a}{b}$ here.\n\n$$a^2 + b^2 = c^2$$')
 })
 
-test('safe formulas get the size command; unsafe ones are left for texy', async () => {
+test('safe formulas go back as written at any size; unsafe ones are left for texy', async () => {
 	const text = 'Sum $\\frac{a}{b}$ and \\(x^2\\).\n\n$$a^2 + b^2 = c^2$$\n\n\\[\\sqrt{2}\\]\n\n$$\n\\begin{aligned}\na &= b \\\\\nc &= d\n\\end{aligned}\n$$\n\n' + ALIGNED
 	const large = handToApp(parse(text), 'large')
 	expect(large.map(b => b.kind)).toEqual(['markdown', 'display'])
 	const md = large[0]?.kind === 'markdown' ? large[0].text : ''
-	expect(md).toContain('Sum $\\large \\frac{a}{b}$ and \\(\\large x^2\\).')
-	expect(md).toContain('$$\\large a^2 + b^2 = c^2$$')
-	expect(md).toContain('\\[\\large \\sqrt{2}\\]')
-	expect(md).toContain('$$\n\\large\n\\begin{aligned}')
+	expect(md).toContain('Sum $\\frac{a}{b}$ and \\(x^2\\).')
+	expect(md).toContain('$$a^2 + b^2 = c^2$$')
+	expect(md).toContain('\\[\\sqrt{2}\\]')
+	expect(md).toContain('$$\n\\begin{aligned}')
+	expect(md).not.toContain('\\large')
 	// The unsafe block is judged as written and stays for texy, with no command added.
 	expect(large[1]?.kind === 'display' ? large[1].raw : '').toBe(ALIGNED)
 
-	expect(handToApp(parse('Sum $\\frac{a}{b}$.'), 'small')[0]).toEqual({ kind: 'markdown', text: 'Sum $\\small \\frac{a}{b}$.' })
+	expect(handToApp(parse('Sum $\\frac{a}{b}$.'), 'small')[0]).toEqual({ kind: 'markdown', text: 'Sum $\\frac{a}{b}$.' })
 	// normal leaves the text exactly as written.
 	expect(handToApp(parse('Sum $\\frac{a}{b}$.'), 'normal')[0]).toEqual({ kind: 'markdown', text: 'Sum $\\frac{a}{b}$.' })
 })
 
-test('at large, a reply the app draws alone gets its sized text', async ($, on) => {
+test('at large, a reply the app draws alone keeps its text as written', async ($, on) => {
 	on('ui.open', () => ({ value: { isPlaced: false, reason: 'narrow' } }))
 	withStore(on)
 	const drawn: string[] = []
@@ -95,7 +206,7 @@ test('at large, a reply the app draws alone gets its sized text', async ($, on) 
 
 	const ui = await $.ui.mount({ ...reply('Sum: $\\frac{a}{b}$'), surface: 'desktop' })
 	expect(await ui.find({ type: 'Text', text: 'engine' })).toBeDefined()
-	expect(drawn[drawn.length - 1]).toBe('Sum: $\\large \\frac{a}{b}$')
+	expect(drawn[drawn.length - 1]).toBe('Sum: $\\frac{a}{b}$')
 	await ui.unmount()
 })
 

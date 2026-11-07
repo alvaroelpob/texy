@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.2.0 (2026-11-07)
 
 - Which formulas texy leaves to the app now follows what the app was measured to render, not a short list of macros. Many more formulas (`\partial`, `\nabla`, `\vec`, `\operatorname`, `\underbrace`, `bmatrix`, `array`...) stay with the app.
 - texy now draws what the app shows as raw LaTeX: inline formulas past 60 characters, ones with `\|`, an unescaped `%`, CJK text or a plain word of four letters, `\ce{}`, `\newcommand`, a multi-line `\[...\]`, and `align` or `gather`, which the app numbers (1) on every row.

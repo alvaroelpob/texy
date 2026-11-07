@@ -16,7 +16,12 @@ export type Marker =
 	| { kind: 'quote' }
 
 export type Block =
-	| { kind: 'markdown'; text: string }
+	| {
+			kind: 'markdown'
+			text: string
+			/** Whether the text continues the line above it in the same paragraph, with no gap. */
+			tight?: boolean
+	  }
 	| { kind: 'display'; tex: string; raw: string }
 	| {
 			kind: 'row'
@@ -80,12 +85,45 @@ function pushMarkdown(out: Block[], text: string, sep = '\n\n'): void {
 	if (last?.kind === 'markdown') {
 		last.text += sep + text
 	} else {
-		out.push({ kind: 'markdown', text })
+		out.push(sep === '\n' ? { kind: 'markdown', text, tight: true } : { kind: 'markdown', text })
 	}
 }
 
-const DISPLAY =
-	/\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\begin\{(equation|align|gather|multline|eqnarray|alignat|flalign)(\*?)\}[\s\S]*?\\end\{\3\4\}/g
+// A `$$` or `\[` that starts a line may span lines. One after text must close
+// on its own line: otherwise a sentence that merely mentions `$$` would pair
+// with the next display, however far below it, and turn the text between them
+// into a formula.
+const DISPLAY = new RegExp(
+	[
+		String.raw`(?<=(?:^|\n)[ \t>]*)\$\$(?<dollar>[\s\S]+?)\$\$`,
+		String.raw`\$\$(?<dollarLine>[^\n]+?)\$\$`,
+		String.raw`(?<=(?:^|\n)[ \t>]*)\\\[(?<bracket>[\s\S]+?)\\\]`,
+		String.raw`\\\[(?<bracketLine>[^\n]+?)\\\]`,
+		String.raw`\\begin\{(?<env>equation|align|gather|multline|eqnarray|alignat|flalign|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|matrix|smallmatrix|cases|array|aligned|gathered|split)(?<star>\*?)\}[\s\S]*?\\end\{\k<env>\k<star>\}`,
+	].join('|'),
+	'g',
+)
+
+/**
+ * Environments the app never finds without `$$` around them, and that read as
+ * a formula only when they start a line: after text they sit inside an inline
+ * `$...$`, which is left alone.
+ */
+const LINE_START_ENVIRONMENTS = new Set([
+	'pmatrix',
+	'bmatrix',
+	'Bmatrix',
+	'vmatrix',
+	'Vmatrix',
+	'matrix',
+	'smallmatrix',
+	'cases',
+	'array',
+	'aligned',
+	'gathered',
+	'split',
+])
+const LINE_START = /(^|\n)[ \t>]*$/
 
 const CODE_SPAN = /(`+)[^`]*?\1/g
 
@@ -98,7 +136,9 @@ function parseProse(src: string, out: Block[]): void {
 	for (const m of src.matchAll(DISPLAY)) {
 		if (inCode(m.index)) continue
 		if (src[m.index - 1] === '\\') continue
-		const tex = (m[1] ?? m[2] ?? m[0]).trim()
+		const g = m.groups ?? {}
+		if (g.env !== undefined && LINE_START_ENVIRONMENTS.has(g.env) && !LINE_START.test(src.slice(0, m.index))) continue
+		const tex = (g.dollar ?? g.dollarLine ?? g.bracket ?? g.bracketLine ?? m[0]).trim()
 		if (tex === '') continue
 		parseParagraphs(src.slice(from, m.index), out)
 		out.push({ kind: 'display', tex, raw: m[0] })
@@ -122,18 +162,16 @@ function parseParagraphs(src: string, out: Block[]): void {
 			continue
 		}
 
-		// One row per list item, heading or quote line; plain lines join the row above.
+		// One row per line: the app breaks a line wherever the reply does, so a
+		// formula texy draws must not pull the lines around it into its own row.
 		const rows: Array<{ marker: Marker; text: string; source: string[] }> = []
 		for (const line of lines) {
-			const marked = markerOf(line)
-			const last = rows[rows.length - 1]
-			if (marked === null && last !== undefined && last.marker.kind !== 'heading') {
-				last.text += ' ' + line.trim()
-				last.source.push(line)
-			} else {
-				const { marker, rest } = marked ?? { marker: { kind: 'none' } as const, rest: line.trim() }
-				rows.push({ marker, text: rest, source: [line] })
-			}
+			// What is left of a paragraph after a display starts with its line break:
+			// that empty line is no row, or the first real line would look like a
+			// continuation and be joined to the display above it.
+			if (line.trim() === '') continue
+			const { marker, rest } = markerOf(line) ?? { marker: { kind: 'none' } as const, rest: line.trim() }
+			rows.push({ marker, text: rest, source: [line] })
 		}
 
 		let first = true

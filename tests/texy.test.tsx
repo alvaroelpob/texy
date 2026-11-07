@@ -4,7 +4,7 @@ import { expect, test } from 'claude-code/testing'
 import { keepBreaks } from '../hooks/draw'
 import { svgOf } from '../hooks/math'
 import { parse, parseInline } from '../hooks/parse'
-import { handToApp, isSafeDisplay, isSafeInline } from '../hooks/safe'
+import { fixTableMath, handToApp, isSafeDisplay, isSafeInline } from '../hooks/safe'
 
 const reply = (text: string) =>
 	({
@@ -309,5 +309,28 @@ test('the pane previews text and math, and a press changes the size', async ($, 
 	expect(await ui.find({ type: 'Svg' })).toBeDefined()
 	await ui.press({ key: 'size-small' })
 	expect((await texy('')).text).toContain('Math size is small')
+	await ui.unmount()
+})
+
+test('table cells the app would show raw get the braces it needs', async ($, on) => {
+	// The cells measured in the app: raw without the braces, rendered with them.
+	expect(fixTableMath('| $S(n,k)$ | $k!\cdot S(n,k)$ |')).toBe('| $S(n,k){}$ | $k!\cdot S(n,k)$ |')
+	expect(fixTableMath('| $S(nk)$ | $n,k$ | $a,b,c$ |')).toBe('| $S(nk){}$ | $n,k{}$ | $a,b,c{}$ |')
+	// What the app takes already, prices, code and text outside tables stay as written.
+	expect(fixTableMath('| $x$ | $f(x)$ | $S(n, k)$ | $a_1$ |')).toBe('| $x$ | $f(x)$ | $S(n, k)$ | $a_1$ |')
+	expect(fixTableMath('| costs $5 and $10 |')).toBe('| costs $5 and $10 |')
+	expect(fixTableMath('| `$S(n,k)$` |')).toBe('| `$S(n,k)$` |')
+	expect(fixTableMath('so $S(n,k)$ here')).toBe('so $S(n,k)$ here')
+	expect(fixTableMath('```\n| $S(n,k)$ |\n```')).toBe('```\n| $S(n,k)$ |\n```')
+
+	// A reply of only a table still reaches the app, with the braces.
+	let seen = ''
+	on('ui.render', ($, e) => {
+		seen = String((e.props as { text?: string }).text)
+		const { Text } = $.ui.resolve(e)
+		return <Text>engine</Text>
+	})
+	const ui = await $.ui.mount({ ...reply('| a |\n|---|\n| $S(n,k)$ |'), surface: 'desktop' })
+	expect(seen).toContain('$S(n,k){}$')
 	await ui.unmount()
 })

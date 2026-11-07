@@ -188,6 +188,35 @@ function appTakesInline(tex: string): boolean {
 	return MATH_CHARACTER.test(tex) && !PROSE.test(outsideBraces(tex))
 }
 
+/**
+ * Table cells go to the app as they are, and its inline test is the same there:
+ * `$S(n,k)$` or `$S(nk)$` show as raw text, while `$S(n,k){}$` renders and looks
+ * the same. A formula with no spaces in a table row that the app would refuse,
+ * and would take with `{}` after it, gets the `{}`. Code fences, code spans and
+ * everything else are left as written.
+ */
+export function fixTableMath(text: string): string {
+	let fence = ''
+	return text
+		.split('\n')
+		.map(line => {
+			const mark = /^\s*(```+|~~~+)/.exec(line)?.[1]
+			if (mark) fence = fence === '' ? mark : mark[0] === fence[0] ? '' : fence
+			if (fence !== '' || mark || !line.trimStart().startsWith('|')) return line
+			return line
+				.split(/(`[^`]*`)/)
+				.map((part, i) =>
+					i % 2 === 1
+						? part
+						: part.replace(/(?<![\\$])\$(?!\$)([^$|\s]+)(?<!\\)\$/g, (whole, tex: string) =>
+								!appTakesInline(tex) && appTakesInline(`${tex}{}`) ? `$${tex}{}$` : whole,
+							),
+				)
+				.join('')
+		})
+		.join('\n')
+}
+
 /** An inline formula ($...$ or \(...\)) the app renders by itself. */
 export function isSafeInline(tex: string): boolean {
 	return tex.length <= MAX_SAFE_INLINE && appTakesInline(tex) && usesOnlySafe(tex, false)

@@ -3,7 +3,7 @@ import type { Register } from 'claude-code'
 
 import { drawBlocks } from './draw'
 import { hasMath, parse } from './parse'
-import { handToApp } from './safe'
+import { fixTableMath, handToApp } from './safe'
 import { registerSettings } from './settings'
 
 // Declared in each file that reads or writes it: the engine lists a module's
@@ -32,8 +32,12 @@ export const register: Register = on => {
 	on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
 		if (e.surface === 'terminal' || e.props.isSummary === true) return next(e)
 
-		const parsed = parse(e.props.text)
-		if (!hasMath(parsed)) return next(e)
+		// Formulas in table cells the app would show raw get the `{}` it needs.
+		const text = fixTableMath(e.props.text)
+		const message = text === e.props.text ? e : { ...e, props: { ...e.props, text } }
+
+		const parsed = parse(text)
+		if (!hasMath(parsed)) return next(message)
 
 		// Reading the size subscribes this reply: a new size redraws it at once.
 		const size = await read($, mathSize)
@@ -44,8 +48,8 @@ export const register: Register = on => {
 		const blocks = handToApp(parsed, size)
 		if (!hasMath(blocks)) {
 			const only = blocks[0]
-			if (size === 'normal' || only?.kind !== 'markdown') return next(e)
-			return next({ ...e, props: { ...e.props, text: only.text } })
+			if (size === 'normal' || only?.kind !== 'markdown') return next(message)
+			return next({ ...message, props: { ...message.props, text: only.text } })
 		}
 
 		return drawBlocks($.ui.resolve(e), blocks, size)
